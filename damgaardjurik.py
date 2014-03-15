@@ -1,6 +1,6 @@
 #! /usr/bin/python
 
-import random, struct
+import random
 
 rng = random.SystemRandom()
 
@@ -96,12 +96,11 @@ class DamgaardJurik:
 
 def pack_int(x):
 	bytelen = ((x.bit_length()+7)/8)
-	s = struct.pack("<H", bytelen)
-	s += ("%%0%ix" % (bytelen*2) % x).decode("hex")
+	s = ("%%0%ix" % (bytelen*2) % x).decode("hex")
 	return s
 
 def unpack_int(s):
-	return int(s[2:].encode("hex"), 16)
+	return int(s.encode("hex"), 16)
 
 if __name__ == "__main__":
 	dj = DamgaardJurik(128, 1)
