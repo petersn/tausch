@@ -55,7 +55,7 @@ Must be followed by length bytes of data.
 """
 
 import SocketServer, traceback, socket, threading, os, time
-import tausch
+import toy_tausch as tausch
 
 ctx = tausch.TauschServer()
 ctx_lock = threading.Lock()
