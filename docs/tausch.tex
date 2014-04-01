@@ -5,12 +5,17 @@
 \begin{document}
 \maketitle
 \begin{abstract}
-Tausch is a distributed protocol for constructing a set of bandwidth-efficient distributed broadcast channels.
-The protocol operates in periodic rounds, in which each user optionally sends a datum to each channel they are broadcasting.
-Each user also publishes an encrypted subscription vector, with elements ranging over broadcast channels.
-The user receives the dot product of their subscription vector with the data vector for the round.
-This allows group-testing style optimizations.
-All computation is distributed.
+Tausch is a distributed protocol for constructing bandwidth-efficient distributed broadcast channels.
+The protocol provides anonymity for those listening to broadcast channels, without use of any trusted servers.
+Assuming $n$ users each transmitting at a constant rate, the naive solution of simply sending all broadcast messages to all users has $\mathcal{O}(n)$ time and bandwidth complexity for each user, and $\mathcal{O}(n^2)$ bandwidth complexity for the network.
+Tausch allows many dynamic time/bandwidth tradeoffs, but in the asymptotically optimal configuration, each user has a $\mathcal{O}(n)$ time burden, $\mathcal{O}(\sqrt{n})$ bandwidth burden, and the network as a whole experiences $\mathcal{O}(n^{1.5})$ bandwith complexity.
+Secure delegation is possible, allowing a user to experience $\mathcal{O}(1)$ time and bandwidth burdens.
 \end{abstract}
+
 \section{Introduction}
+Tausch is a protocol (with accompanying implementation) for constructing anonymous broadcast channels.
+Each channel can be transmitted to only by a single user, and can be recieved by any number of users.
+No party can determine if a given user is recieving a given channel, but can determine the number of channels he or she is recieving.
+A secure instantiation of this functionality can be built by simply having every user broadcast every message to every other user.
+
 \end{document}
