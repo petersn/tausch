@@ -8,7 +8,7 @@ def miller_rabin(n, k=32):
 	"""miller_rabin(n, k=32) -> bool
 
 	If n is prime, returns True.
-	Otherwise, returns True with probability 4**(-k).
+	Otherwise, returns True with probability at most 4**-k.
 	"""
 	nm = [n-1, n-2]
 	d, s = nm[0], 0
@@ -17,11 +17,11 @@ def miller_rabin(n, k=32):
 		s += 1
 	for _ in xrange(k):
 		a = random.randint(2, nm[1])
-		x  = pow(a, d, n)
+		x = pow(a, d, n)
 		if x == 1 or x == nm[0]:
 			continue
 		for _ in xrange(s):
-			x = (x**2) % n
+			x = pow(x, 2, n)
 			if x == 1:
 				return False
 			elif x == nm[0]:
@@ -55,7 +55,7 @@ def bit_prime(bits):
 class DamgaardJurik:
 	"""
 	Provides Damgaard-Jurik encryption.
-	An instance is given two parameters, byte_length, and s.
+	The constructor is given two parameters, byte_length, and s.
 	Each encryption is of length byte_length*(s+1), and each
 	message may be up to byte_length*s bytes long.
 	"""
@@ -106,10 +106,10 @@ if __name__ == "__main__":
 	dj = DamgaardJurik(128, 1)
 	x = dj.encrypt(123)
 	y = dj.encrypt(321)
-	print x
-	print y
-	print dj.decrypt(x)
-	print dj.decrypt(y)
+	print "E(x) =", x
+	print "E(y) =", y
+	print "D(E(x)) =", dj.decrypt(x)
+	print "D(E(y)) =", dj.decrypt(y)
 	m = (x*y)%dj.nsp
-	print dj.decrypt(m)
+	print "D(E(x)*E(y)) =", dj.decrypt(m)
 

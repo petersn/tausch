@@ -1,0 +1,103 @@
+\documentclass[12pt]{article}
+\usepackage{amsmath,amssymb}
+\title{Tausch Optimization}
+\author{Peter Schmidt-Nielsen}
+\begin{document}
+\maketitle
+\section{Problem Statement}
+The central Tausch master has to distribute the task of computing a homomorphic matrix multiplication among its clients.
+Let the matrix $A$ be the occupancy matrix, with $A_{ij}$ being equal to one if subscription $i$ contains an entry for stream $j$, and zero otherwise.
+The computational task concerns itself with nonzero entries of $A$, the set of indices $\mathcal{A} = \{ (i, j)\ |\ A_{ij} = 1 \}$.
+The task is divided among a set of $U$ client users.
+Each user $u \in U$ is given a workset $S_u \subset \mathcal{A}$.
+Naturally, these sets $S$ must cover $\mathcal{A}$, lest the task go uncompleted.
+In other words, we need that $\bigcup_{u \in U} S_u = \mathcal{A}$.
+Note that we do \emph{not} need that $S$ be a partition, in that clients are free to do redundant work.
+
+In each round a user $u$ must receive a block from each stream under consideration in $S_u$.
+Further, a block of output must be transmitted back to the master per subscription under consideration in $S_u$.
+If we let $\pi_1\left( (x, y) \right) = x$ and $\pi_2\left( (x, y) \right) = y$ be projection functions on the first and second coordinates respectively, the upload and download costs to a user $u$ are thus $|\pi_1(S_u)|$ and $|\pi_2(S_u)|$ respectively.
+%We shall initially neglect the bandwidth requirements placed on the clients, and consider only the computational requirements.
+Additionally, one modular multiplication must be made per element in $S_u$.
+Thus, computation scales directly as $|S_u|$.
+
+Each user $u$ is modeled as having three performance parameters, $I_u$, $O_u$, and $C_u$ that represent input link, output link, and computational speeds.
+Naturally, $I_u$ and $O_u$ have the same units of blocks per second of IO, while $C_u$ has units of modular exponentiations per second.
+Given a cover that defines how much work a user must perform and the three performance parameters a time constant may be defined for $u$ specifying how long $u$ will take to finish computation and communication for a round.
+A user $u$'s time constant $\tau_u$ is given as:
+\begin{align}
+\tau_u = \max\left( \frac{|\pi_1(S_u)|}{O_u}, \frac{|\pi_2(S_u)|}{I_u}, \frac{|S_u|}{C_u} \right)\label{localtau}
+\end{align}
+
+On top of all the above, the server must aggregate all the output blocks from each user.
+If we give the master a downlink bandwidth of $D$ we get a bound of $\sum_{u \in U} |\pi_1(S_u)| / D$ on how quickly the master can join up all the subproblems solved by clients.
+
+Our goal is to find a cover $S$ of $\mathcal{A}$ that minimizes the global time constant:
+\begin{align}
+\tau = \max \left( \max_{u \in U} \tau_u, \frac{\sum_{u \in U} |\pi_1(S_u)|}{D} \right)\label{globaltau}
+\end{align}
+
+\subsection{Bounds}
+How low can $\tau$ possibly go?
+The easiest bound we can prove is if we assume that computation is always limiting.
+In this case, we can bound:
+\begin{align}
+\tau \ge \frac{|\mathcal{A}|}{\sum_{u \in U} C_u}\label{compbound}
+\end{align}
+Additionally, we can determine two similar bounds derived from bandwidth:
+\begin{align}
+\tau \ge \frac{|\pi_1(\mathcal{A})|}{\sum_{u \in U} O_u} \qquad \tau \ge \frac{|\pi_2(\mathcal{A})|}{\sum_{u \in U} I_u}\label{bandbounds}
+\end{align}
+
+Finally, the master's bandwidth is limiting only when the second term in \eqref{globaltau} is active.
+Optimally, this occurs when all users process completely disjoint sets of streams, in which case the following bound is achieved:
+\[ \tau \ge \frac{|\pi_1(\mathcal{A})|}{D} \]
+Note that this is strictly stronger than the first bound of \eqref{bandbounds} when $D < \sum_{u \in U} O_u$ and weaker otherwise.
+
+\section{Partitioning}
+If we assume that $I_u \approx O_u \approx D \approx \infty$, then we get that the computational bound \eqref{compbound} becomes strict equality under any cover $S$ that is also a partition.
+This is the easiest possible case.
+In general, a user with lots of bandwidth compared to computational power is easy to schedule.
+We simply give the user as many complete subscriptions as possible, minimizing the communication load on the master, while maximizing the computation.
+
+This can be thought of as a ``wide'' workload $S_u$, in the sense that it occupies many columns while minimizing the number of active rows.
+In other words, its projection $\pi_1(S_u)$ is small compared to its projection $\pi_2(S_u)$.
+
+On the other hand, computation heavy nodes that are bandwidth limited are much harder.
+They must be accomodated, and given a more balanced tradeoff of width and height.
+
+We would shouldn't give any users ``tall'' workloads, because this corresponds to a workload in which lots of IO is done with barely any crunching down and reduction of size.
+
+Thus, qualitatively:
+\begin{center}
+\begin{tabular}{c|c|c|c}
+Limiting: & $I_u$    & $O_u$ & $C_u$ \\\hline
+Response: & Balanced & Wide  & Wide
+\end{tabular}
+\end{center}
+
+Note that it makes very little sense to assume that even a large fraction of our users will have $I_u \approx O_u \approx \infty$.
+If this were true then using Tausch would offer little benefit, as users could simply run the naive $\mathcal{O}(n^2)$ communication complexity solution of encrypting nothing and sending all packets to all other users.
+
+\subsection{Greedy Algorithm}
+The above considerations lead to the following naive greedy algorithm.
+We simply iteratively determine the limiting factor on $\tau$, and attempt to make it better.
+We define the user $u \in U$ that is most or least limited by 
+
+There are two main cases:
+\renewcommand{\labelenumi}{\textit{\Roman{enumi}.}}
+\renewcommand{\labelenumii}{\textbf{\Roman{enumii}.}}
+\begin{enumerate}
+\item User $u$ is rate limiting, with $\tau = \tau_u$.
+\begin{enumerate}
+\item Foo.
+\item Bar.
+\item Wablim.
+\item Shrix.
+\end{enumerate}
+\item The master's downlink ($D$) is rate limiting.
+We must widen some user.
+\textbf{Action:} Find the user closed to saturating it's output link, and eliminate 
+\end{enumerate}
+
+\end{document}
