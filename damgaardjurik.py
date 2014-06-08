@@ -31,10 +31,7 @@ def miller_rabin(n, k=32):
 	return True
 
 def modular_inverse(a, m):
-	"""modular_inverse(a, m) -> int
-
-	Returns b such that (a*b)%m == 1
-	"""
+	"""modular_inverse(a, m) -> b such that (a*b)%m == 1"""
 	def egcd(a, b):
 		if a == 0:
 			return (b, 0, 1)
@@ -47,8 +44,7 @@ def modular_inverse(a, m):
 def bit_prime(bits):
 	"""bit_prime(bits) -> probable prime of given bit length"""
 	while True:
-		p = rng.getrandbits(bits)
-		p |= 1<<(bits-1)
+		p = rng.getrandbits(bits) | (1 << (bits-1))
 		if miller_rabin(p):
 			return p
 
