@@ -54,6 +54,10 @@ namespace global {
 	map<SubId, Subscription*> subscriptions;
 	// Maps a round and subid to a computation object.
 	map<RoundNum, map<SubId, Computation*>> computations;
+	// Maps a round to a semaphore that will accumulate a post per completed computation.
+	map<RoundNum, sem_t> round_semaphore;
+	// Maps a round to the number of computations (i.e. number of times to call wait) in a round.
+	map<RoundNum, int> round_semaphore_waits;
 
 	// Data used for communication between the workers and the main thread.
 	StreamId job_stream_id;
@@ -185,8 +189,9 @@ struct Entry {
 struct Computation {
 	Subscription* sub;
 	mpz_t* accums;
+	int pending_computations;
 
-	Computation(Subscription* sub) : sub(sub) {
+	Computation(Subscription* sub) : sub(sub), pending_computations(0) {
 		// Allocate one accumulator per thread, so that multiple threads can work on the computation at the same time.
 		// In the end, the answer is the product of these accumulators.
 		accums = new mpz_t[global::thread_count];
@@ -258,6 +263,7 @@ void* process_thread(void* cookie) {
 			Computation* comp = global::computations[round_number][sub_id];
 			comp->process_datum(thread_index, stream_id, datum);
 		}
+		sem_post(&global::round_semaphore[round_number]);
 		UNLOCK_GLOBALS;
 	}
 
@@ -406,7 +412,15 @@ int main(int argc, char** argv) {
 				mpz_set_str(temp_mpz, buf, 16);
 //				gmp_printf("Computation: stream=%i round=%i datum=%Zd\n", stream_id, round_number, temp_mpz);
 				// Create any new computation objects required.
+
 				WRITE_LOCK_GLOBALS;
+				// Increment the number of jobs in the given round, and create a semaphore for it.
+				if (global::round_semaphore.count(round_number) == 0) {
+					global::round_semaphore_waits[round_number] = 0;
+					assert(sem_init(&global::round_semaphore[round_number], 0, 0) == 0);
+				}
+				global::round_semaphore_waits[round_number]++; 
+
 				map<SubId, Computation*>& comps = global::computations[round_number];
 				for (auto it = global::subscriptions.begin(); it != global::subscriptions.end(); it++) {
 					// Create a computation object for this subscription in this round number.
@@ -427,6 +441,11 @@ int main(int argc, char** argv) {
 				// Read out completed answers.
 				FILL(round_number);
 //				gmp_printf("Replying: round=%lu\n", round_number);
+				// Wait until the round is done.
+				for (int i = 0; i < global::round_semaphore_waits[round_number]; i++) {
+					sem_wait(&global::round_semaphore[round_number]);
+				}
+				// TODO: Let's reset the round semaphore thingy.
 				WRITE_LOCK_GLOBALS;
 				map<SubId, Computation*>& comps = global::computations[round_number];
 				uint64_t field = comps.size();
