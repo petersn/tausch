@@ -248,7 +248,7 @@ void* process_thread(void* cookie) {
 		StreamId stream_id = global::job_stream_id;
 		RoundNum round_number = global::job_round_number;
 		mpz_set(datum, *global::job_datum);
-		// Release the global lock, indicating that the global job data can be mutated, and used to issue another job to a different thread.
+		// Tell the main thread that we're done reading in the job description.
 		sem_post(&global::job_read_complete);
 		// Find each subscription object, and build the computation required.
 //		gmp_printf("Performing job: stream=%i round=%i datum=%Zd\n", stream_id, round_number, datum);
@@ -265,24 +265,61 @@ void* process_thread(void* cookie) {
 	return NULL;
 }
 
+void print_usage_and_quit() {
+	printf("Usage: cruncher [options] host port\n");
+	printf("  -t n -- Use n worker threads, plus the main thread.\n");
+	printf("  -z n -- Use n-bit acceleration tables.\n");
+	printf("\n");
+	printf("Scaling: n-bit tables provide n times speedup, but takes 2^n space.\n");
+	printf("Setting n = 0 turns off acceleration tables, which reduces space\n");
+	printf("consumption by a factor of about 2000, and only slows things down\n");
+	printf("by a factor of about 2, as compared to n = 1.\n");
+	exit(2);
+}
+
 int main(int argc, char** argv) {
-	if (argc != 4) {
-		fprintf(stderr, "Usage: cruncher <host> <port> <nthreads>\n");
-		exit(2);
+	// Set some reasonable defaults.
+	global::thread_count = 8;
+	global::default_tradeoff = 8;
+	global::bits_per_field = 2048;
+
+	int opt;
+	while ((opt = getopt(argc, argv, "t:z:")) != -1) {
+		switch (opt) {
+			case 't':
+				global::thread_count = atoi(optarg);
+				break;
+			case 'z':
+				global::default_tradeoff = atoi(optarg);
+				break;
+			default:
+				print_usage_and_quit();
+		}
 	}
-	int sockfd = create_connection(argv[1], argv[2]);
+	// Assert some (extremely generous) range limits.
+	assert(global::thread_count >= 1 && global::thread_count <= 1024);
+	assert(global::default_tradeoff >= 0 && global::default_tradeoff <= 16);
+	assert(global::bits_per_field >= 0 && global::bits_per_field <= 1048576);
+
+	// Expect exactly two additional arguments.
+	if (optind != argc - 2) {
+		print_usage_and_quit();
+	}
+
+	// Print some information confirming the options.
+	printf("Using: %i threads, ", global::thread_count);
+	if (global::default_tradeoff == 0)
+		printf("no acceleration tables\n");
+	else
+		printf("%i-bit acceleration tables\n", global::default_tradeoff);
+	printf("=== %s:%s\n", argv[argc-2], argv[argc-1]);
+
+	int sockfd = create_connection(argv[argc-2], argv[argc-1]);
 	printf("Connected.\n");
 
 	assert(sem_init(&global::job_available, 0, 0) == 0);
 	assert(sem_init(&global::job_read_complete, 0, 0) == 0);
 	assert(pthread_rwlock_init(&global::globals_rwlock, NULL) == 0);
-
-	// Set some reasonable defaults.
-	global::bits_per_field = 2048;
-	global::default_tradeoff = 0;
-
-	global::thread_count = atoi(argv[3]);
-	printf("Using %i threads.\n", global::thread_count);
 
 	// Spawn worker threads.
 	vector<pthread_t> threads;
