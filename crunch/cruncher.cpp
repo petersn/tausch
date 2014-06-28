@@ -445,7 +445,7 @@ int main(int argc, char** argv) {
 				for (int i = 0; i < global::round_semaphore_waits[round_number]; i++) {
 					sem_wait(&global::round_semaphore[round_number]);
 				}
-				// TODO: Let's reset the round semaphore thingy.
+
 				WRITE_LOCK_GLOBALS;
 				map<SubId, Computation*>& comps = global::computations[round_number];
 				uint64_t field = comps.size();
@@ -458,7 +458,23 @@ int main(int argc, char** argv) {
 					int bytes = gmp_snprintf(buf, READ_BUFFER_LENGTH, "%Zx", temp_mpz);
 					assert(bytes < READ_BUFFER_LENGTH);
 					write(sockfd, buf, bytes+1);
+					// Delete the allocation as we go, as we're done with the round.
+					delete it->second;
 				}
+				// Now we can clear out all the computations, storage, and semaphores for the round.
+				// Observe that if no computation was ever issued for a given round, default initializers
+				// will cause all the above code to still work. However, destroying a semaphore requires
+				// a greater degree of certainty. Therefore, do a check to see if we actually allocated one.
+				#define REMOVE_RN(x) x.erase(x.find(round_number))
+				if (global::round_semaphore.count(round_number) == 1) {
+					sem_destroy(&global::round_semaphore[round_number]);
+					REMOVE_RN(global::round_semaphore);
+					REMOVE_RN(global::round_semaphore_waits);
+				}
+				if (global::computations.count(round_number) == 1) {
+					REMOVE_RN(global::computations);
+				}
+				#undef REMOVE_RN
 				UNLOCK_GLOBALS;
 				break;
 			}
