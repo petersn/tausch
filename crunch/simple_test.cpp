@@ -1,24 +1,93 @@
 // Simplest exponentiation test.
 
 #include <gmp.h>
+#include <sys/time.h>
+#include <stdio.h>
 
-#define ITERS 500
-#define N1 "f771c523cc114c6da8cd91b6604946078352752405239dd544a5a48335cb4946d4c11420c8df3e8b0e34d8bfb96ff1eff26a22062c6ffdffb40806804d6fda750503f21324a7d2140558da21737c49c67107ff6ac00abc924d1563d1f3d8566f6e3bd7716a6df29091a826f70ffff20f1325b279ad1dadb0ca994c972b42d6f54ea932306e2967537d0263684dd8b5c53288e7f65b8e795adbc3f4e4d83942a7fa60ccf4d9447cd57d5a0860f7fdbc1900c2b4fef49e66cfc0fc2c4c10cc7787455ff175f2f10456fe7f835cc209ebefbc12123119ec0710914c2832a62aad32e2b05d514b7a8893452fe722af0910915e4847168e7a391d871affd08e17420a"
-#define N2 "93b1cba66313f8d7e13e132e5998977b2b2845c279b30fd52a83b940dc1df05b99ac215ce6bf9f7f55fc315af6b47d3ae865e351c12112eedb5c1f56949d627ca2ba87e1d65befce5ff666d5a6f4f23a3b6ee5bc3e6c09e33b5a46762c0f4610a2b0af2a56e4c73cc617430843a5278c510d6cd66548a7560afdd6c35005d76ef14decbc9a66ec69acb9ae7b39a9267a5b212816df6d06c5f52ac723112b868138ba4626016b4a5e8e60dbb0598f988ece401f13f1c7a9ca9e52350ae82b5613d075f7526d34812bae44feafa0a25b9af194a83487f40f62a3f6c07a500ed470796f4487ba52107ec2a6372e780796a401e545c1646de4757289cf00fb972d99"
-#define N3 "25deb9773c69088d05dd419f6862ed6badc3787e74d22a063047e0e591b053c7d2ec6aeb102927d448cb70f2848470daae4e1a40fde61ff6081ae68749382e5e1100955ab64ff8197d789e1e49ece30c94ff4e4b47dc31e3882c5c29fe21d6a64db5c804b9b56a9dfbe4c55c8580da40698e281000c3f2944a3e1a2da15d6ab37f131cdfd2cfd0508f2717438b384a574bea065176de9c49471f198d86fab8f7487841c8ca575cbe40f31620f2223009e17f87a123033f2498dd11bc50baca87db4da468bb571f2f75e69c29e0581d9c97fd4c8bf2a03d4773385e28ded82b4b05617a0ad13251aa5c037480f5e57b9e9108d3796f6d8e21a1e2f5409d8b60ae"
+#define EXP_ITERS 500
+#define MUL_ITERS 1000000
+#define TARGET_MEM_IN_MiB ((float)(1<<15))
+#define TARGET_BYTES_PER_SECOND 2048.0
+#define MAX_TRADEOFF 21
+#define THREADING_BOOST 8.0
+
+#define TARGET_S_PER_ROUND (128.0 / TARGET_BYTES_PER_SECOND)
+
+#define DT ((stop.tv_sec + stop.tv_usec*1e-6) - (start.tv_sec + start.tv_usec*1e-6))
+#define STATS(iters) do { \
+		printf("Total time: %f\n", DT); \
+		printf("Ops:        %i\n", iters); \
+		printf("Ops/s:      %f\n", iters / DT); \
+	} while (0)
+
 
 int main(int argc, char** argv) {
-	mpz_t x, y, z, w;
-	mpz_init(x);
-	mpz_init(y);
-	mpz_init(z);
-	mpz_init(w);
-	mpz_set_str(x, N1, 16);
-	mpz_set_str(y, N2, 16);
-	mpz_set_str(z, N3, 16);
-	int i;
-	for (i = 0; i < ITERS; i++)
-		mpz_powm(w, x, y, z);
+	struct timeval start, stop; 
+	printf("Benchmarking 2048-bit ** 2048-bit modulo 2048-bit exponentiation.\n");
+	mpz_t x, y, z;
+	mpz_init_set_ui(x, 7);
+	mpz_init_set_ui(y, 3);
+	mpz_init_set_ui(z, 5);
+	mpz_pow_ui(x, x, 729);
+	mpz_pow_ui(y, y, 1292);
+	mpz_pow_ui(z, z, 882);
+	gettimeofday(&start, NULL);
+	int i = EXP_ITERS;
+	while (i--)
+		mpz_powm(x, x, y, z);
+	gettimeofday(&stop, NULL);
+	STATS(EXP_ITERS);
+	double native_rate = EXP_ITERS / DT;
+
+	printf("Benchmarking 2048-bit * 2048-bit modulo 2048-bit multiplication.\n");
+	gettimeofday(&start, NULL);
+	i = MUL_ITERS;
+	while (i--) {
+		mpz_mul(x, x, y);
+		mpz_mod(x, x, z);
+	}
+	gettimeofday(&stop, NULL);
+	STATS(MUL_ITERS);
+
+	double rate = MUL_ITERS / DT;
+	printf("\n=== Derived statistics:\n");
+	printf("Naive resultant exp speed: x%.2f\n", rate / 3072 / native_rate);
+	printf("With acceleration tables:\n");
+	double total_speed[MAX_TRADEOFF];
+	double memory_per_entry[MAX_TRADEOFF];
+	for (int i = 1; i < MAX_TRADEOFF; i++) {
+		double muls_needed = (2048.0 / i) * (1 - 1.0/(1<<i));
+		double mem_expand = (2048.0 / i) * ((1<<i) - 1);
+		double mem_mib = (mem_expand * 256.0) / (1<<20);
+		printf("  %2i-bit: x%.2f (%.2f MiB/entry)", i, (rate / muls_needed) / native_rate, mem_mib);
+		if (i%2 == 0)
+			printf("\n");
+		total_speed[i] = rate / muls_needed;
+		memory_per_entry[i] = mem_mib;
+	}
+
+	printf("\n=== Parameter search:\n");
+	printf("Assuming:\n");
+	printf("  Target data rate: %.1f bytes/s\n", TARGET_BYTES_PER_SECOND);
+	printf("  System memory: %.1f MiB\n", TARGET_MEM_IN_MiB);
+	printf("  Threading boost: x%.1f\n", THREADING_BOOST);
+
+	int last_tradeoff, users;
+	for (users = 1; ; users++) {
+		double muls_per_s = users * users / TARGET_S_PER_ROUND;
+		bool flag = false;
+		for (int i = 1; i < MAX_TRADEOFF; i++) {
+			if (total_speed[i]*THREADING_BOOST >= muls_per_s && memory_per_entry[i] * users * users < TARGET_MEM_IN_MiB) {
+				flag = true;
+				last_tradeoff = i;
+			}
+		}
+		if (not flag)
+			break;
+	}
+	printf("Last workable parameters:\n");
+	printf("Users: %i, with %i-bit tables.\n", users-1, last_tradeoff);
+
 	return 0;
 }
 
