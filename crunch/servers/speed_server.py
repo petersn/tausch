@@ -24,9 +24,11 @@ def read_results():
 		while not s.endswith("\0"): s += fd.read(1)
 		results.append((sub, int(s[:-1], 16)))
 	return results
-SUB_COUNT = 40
-STREAM_COUNT = 40
+SUB_COUNT = 8
+STREAM_COUNT = 24
+ROUND_COUNT = 48
 
+start_time = time.time()
 print "Connected by", addr
 for i in xrange(SUB_COUNT):
 	print "Filling sub:", i+1
@@ -34,11 +36,25 @@ for i in xrange(SUB_COUNT):
 	for j in xrange(STREAM_COUNT):
 		S("a", i, 1000+j, Z(random.getrandbits(2047)))
 print "Sending computations."
-for i in xrange(STREAM_COUNT):
-	S("c", 1000+i, 1000000, Z(random.getrandbits(2047)))
-
-S("r", 1000000)
-data = read_results()
-print "Got %i bytes of results." % len(str(data))
+for r in xrange(ROUND_COUNT):
+	print "For round:", r+1
+	for i in xrange(STREAM_COUNT):
+		S("c", 1000+i, 1000000+r, Z(random.getrandbits(2047)))
+print "Done issuing."
+total_results = []
+for r in xrange(ROUND_COUNT):
+	S("r", 1000000+r)
+	data = read_results()
+	print "Got data from round:", r+1
+	total_results.append(data)
+print "Got %i bytes of results." % len(str(total_results))
+stop_time = time.time()
 conn.close()
+
+tt = stop_time - start_time
+to = SUB_COUNT * STREAM_COUNT * ROUND_COUNT
+print
+print "Total time:", stop_time - start_time
+print "Total operations:", to
+print "Ops/s:", to / tt
 

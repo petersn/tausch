@@ -45,6 +45,14 @@ struct Subscription;
 struct Entry;
 struct Computation;
 
+struct JobSlot {
+	StreamId stream_id;
+	RoundNum round_number;
+	mpz_t datum;
+	sem_t job_described;
+	bool ready_for_job;
+};
+
 // Global storage.
 namespace global {
 	int thread_count;
@@ -58,16 +66,12 @@ namespace global {
 	map<RoundNum, sem_t> round_semaphore;
 	// Maps a round to the number of computations (i.e. number of times to call wait) in a round.
 	map<RoundNum, int> round_semaphore_waits;
-
 	// Data used for communication between the workers and the main thread.
-	StreamId job_stream_id;
-	RoundNum job_round_number;
-	mpz_t* job_datum;
-
+	JobSlot* job_slots;
 	// This lock synchronizes reads and writes to subscriptions and computations.
 	pthread_rwlock_t globals_rwlock;
 	// These semaphores are used to send jobs to worker threads, and signal the main thread that the job data has been read respectively.
-	sem_t job_available, job_read_complete; 
+	sem_t workers_ready; 
 }
 #define READ_LOCK_GLOBALS pthread_rwlock_rdlock(&global::globals_rwlock)
 #define WRITE_LOCK_GLOBALS pthread_rwlock_wrlock(&global::globals_rwlock)
@@ -247,14 +251,17 @@ void* process_thread(void* cookie) {
 	mpz_init(datum);
 
 	while (1) {
-		// Grab a job.
-		sem_wait(&global::job_available);
+		// Grab a job in our slot.
+		sem_wait(&global::job_slots[thread_index].job_described);
 		// Read in the job.
-		StreamId stream_id = global::job_stream_id;
-		RoundNum round_number = global::job_round_number;
-		mpz_set(datum, *global::job_datum);
+		JobSlot& js = global::job_slots[thread_index];
+		StreamId stream_id = js.stream_id;
+		RoundNum round_number = js.round_number;
+		mpz_set(datum, js.datum);
+//		gmp_printf("Starting job: stream=%i round=%i datum=%Zd\n", stream_id, round_number, datum);
 		// Tell the main thread that we're done reading in the job description.
-		sem_post(&global::job_read_complete);
+		js.ready_for_job = true;
+		sem_post(&global::workers_ready);
 		// Find each subscription object, and build the computation required.
 //		gmp_printf("Performing job: stream=%i round=%i datum=%Zd\n", stream_id, round_number, datum);
 		READ_LOCK_GLOBALS;
@@ -276,17 +283,17 @@ void print_usage_and_quit() {
 	printf("  -t n -- Use n worker threads, plus the main thread.\n");
 	printf("  -z n -- Use n-bit acceleration tables.\n");
 	printf("\n");
-	printf("Scaling: n-bit tables provide n times speedup, but takes 2^n space.\n");
+	printf("Scaling: n-bit tables provide n times speedup, but takes (2^n)/n space.\n");
 	printf("Setting n = 0 turns off acceleration tables, which reduces space\n");
-	printf("consumption by a factor of about 2000, and only slows things down\n");
-	printf("by a factor of about 2, as compared to n = 1.\n");
+	printf("consumption by a factor of about 2000, and only slows things down by a\n");
+	printf("factor of about 2, as compared to n = 1.\n");
 	exit(2);
 }
 
 int main(int argc, char** argv) {
 	// Set some reasonable defaults.
 	global::thread_count = 8;
-	global::default_tradeoff = 8;
+	global::default_tradeoff = 0;
 	global::bits_per_field = 2048;
 
 	int opt;
@@ -323,14 +330,25 @@ int main(int argc, char** argv) {
 	int sockfd = create_connection(argv[argc-2], argv[argc-1]);
 	printf("Connected.\n");
 
-	assert(sem_init(&global::job_available, 0, 0) == 0);
-	assert(sem_init(&global::job_read_complete, 0, 0) == 0);
+	assert(sem_init(&global::workers_ready, 0, global::thread_count) == 0);
 	assert(pthread_rwlock_init(&global::globals_rwlock, NULL) == 0);
+
+	// Construct the job slot structure.
+	// This consists of one semaphore and one flag per job slot.
+	// Each thread waits on its job slot's semaphore.
+	// When triggered, it reads in the job in.
+	// TODO: finish documenting protocol
+	global::job_slots = new JobSlot[global::thread_count];
+	for (int i = 0; i < global::thread_count; i++) {
+		assert(sem_init(&global::job_slots[i].job_described, 0, 0) == 0);
+		global::job_slots[i].ready_for_job = true;
+		mpz_init(global::job_slots[i].datum);
+	}
 
 	// Spawn worker threads.
 	vector<pthread_t> threads;
 	threads.resize(global::thread_count);
-	for (int i=0; i<global::thread_count; i++)
+	for (int i = 0; i < global::thread_count; i++)
 		pthread_create(&threads[i], NULL, process_thread, (void*)new int(i));
 
 	char* buf = new char[READ_BUFFER_LENGTH+1];
@@ -413,7 +431,6 @@ int main(int argc, char** argv) {
 //				gmp_printf("Computation: stream=%i round=%i datum=%Zd\n", stream_id, round_number, temp_mpz);
 				// Create any new computation objects required.
 
-				WRITE_LOCK_GLOBALS;
 				// Increment the number of jobs in the given round, and create a semaphore for it.
 				if (global::round_semaphore.count(round_number) == 0) {
 					global::round_semaphore_waits[round_number] = 0;
@@ -421,20 +438,38 @@ int main(int argc, char** argv) {
 				}
 				global::round_semaphore_waits[round_number]++; 
 
+				// If the given round does not yet exist, then we can freely add it.
+				bool have_lock = false;
+				if (global::computations.count(round_number) == 0) {
+					WRITE_LOCK_GLOBALS;
+					have_lock = true;
+				}
 				map<SubId, Computation*>& comps = global::computations[round_number];
+				if (have_lock)
+					UNLOCK_GLOBALS;
 				for (auto it = global::subscriptions.begin(); it != global::subscriptions.end(); it++) {
 					// Create a computation object for this subscription in this round number.
 					if (comps.count(it->first) == 0)
 						comps[it->first] = new Computation(it->second);
 				}
-				UNLOCK_GLOBALS;
 
-				// Fill up the global job description.
-				global::job_stream_id = stream_id;
-				global::job_round_number = round_number;
-				global::job_datum = &temp_mpz;
-				sem_post(&global::job_available);
-				sem_wait(&global::job_read_complete);
+				// Wait for a ready worker.
+				sem_wait(&global::workers_ready);
+				// Find a free slot.
+				for (int i = 0; i < global::thread_count; i++) {
+					JobSlot& js = global::job_slots[i];
+					if (js.ready_for_job) {
+						js.ready_for_job = false;
+						js.stream_id = stream_id;
+						js.round_number = round_number;
+						mpz_set(js.datum, temp_mpz);
+						// Signal the thread to begin the job.
+						sem_post(&js.job_described);
+						goto job_assigned;
+					}
+				}
+				assert("BUGBUGBUG: global::workers_ready semaphore was non-empty when no slot was free!" == NULL);
+				job_assigned:
 				break;
 			}
 			case 'r': {
