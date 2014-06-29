@@ -45,10 +45,18 @@ struct Subscription;
 struct Entry;
 struct Computation;
 
+typedef enum {
+	JOB_NONE,
+	JOB_COMP,
+	JOB_REBUILD,
+} jobtype_t;
+
 struct JobSlot {
 	StreamId stream_id;
 	RoundNum round_number;
 	mpz_t datum;
+	Entry* to_rebuild;
+	jobtype_t type;
 	sem_t job_described;
 	bool ready_for_job;
 };
@@ -255,23 +263,33 @@ void* process_thread(void* cookie) {
 		sem_wait(&global::job_slots[thread_index].job_described);
 		// Read in the job.
 		JobSlot& js = global::job_slots[thread_index];
+		Entry* entry = js.to_rebuild;
 		StreamId stream_id = js.stream_id;
 		RoundNum round_number = js.round_number;
-		mpz_set(datum, js.datum);
+		jobtype_t type = js.type;
+		if (type == JOB_COMP)
+			mpz_set(datum, js.datum);
 //		gmp_printf("Starting job: stream=%i round=%i datum=%Zd\n", stream_id, round_number, datum);
 		// Tell the main thread that we're done reading in the job description.
-		js.ready_for_job = true;
-		sem_post(&global::workers_ready);
 		// Find each subscription object, and build the computation required.
 //		gmp_printf("Performing job: stream=%i round=%i datum=%Zd\n", stream_id, round_number, datum);
-		READ_LOCK_GLOBALS;
-		for (auto it = global::subscriptions.begin(); it != global::subscriptions.end(); it++) {
-			SubId sub_id = it->first;
-			Computation* comp = global::computations[round_number][sub_id];
-			comp->process_datum(thread_index, stream_id, datum);
+		js.ready_for_job = true;
+		sem_post(&global::workers_ready);
+
+		if (type == JOB_COMP) {
+			READ_LOCK_GLOBALS;
+			gmp_printf("Computing in thread: %i\n", thread_index);
+			for (auto it = global::subscriptions.begin(); it != global::subscriptions.end(); it++) {
+				SubId sub_id = it->first;
+				Computation* comp = global::computations[round_number][sub_id];
+				comp->process_datum(thread_index, stream_id, datum);
+			}
+			sem_post(&global::round_semaphore[round_number]);
+			UNLOCK_GLOBALS;
+		} else if (type == JOB_REBUILD) {
+			gmp_printf("Rebuilding %p as %i-bit in thread: %i\n", entry, global::default_tradeoff, thread_index);
+			entry->rebuild_table(global::default_tradeoff);
 		}
-		sem_post(&global::round_semaphore[round_number]);
-		UNLOCK_GLOBALS;
 	}
 
 	mpz_clear(datum);
@@ -406,9 +424,24 @@ int main(int argc, char** argv) {
 					if (sub->entries.count(stream_id) == 1)
 						delete sub->entries[stream_id];
 					Entry* entry = sub->entries[stream_id] = new Entry(sub, temp_mpz);
-					// TODO: Rebuilding the table is expensive!
-					// Eventually, move this to a worker thread.
-					entry->rebuild_table(global::default_tradeoff);
+					// Issue a job to rebuild the table.
+
+					// Wait for a ready worker.
+					sem_wait(&global::workers_ready);
+					// Find a free slot.
+					for (int i = 0; i < global::thread_count; i++) {
+						JobSlot& js = global::job_slots[i];
+						if (js.ready_for_job) {
+							js.ready_for_job = false;
+							js.type = JOB_REBUILD;
+							js.to_rebuild = entry;
+							// Signal the thread to begin the job.
+							sem_post(&js.job_described);
+							goto job_assigned1;
+						}
+					}
+					assert("BUGBUGBUG: global::workers_ready semaphore was non-empty when no slot was free!" == NULL);
+					job_assigned1:;
 				}
 				UNLOCK_GLOBALS;
 				break;
@@ -460,16 +493,17 @@ int main(int argc, char** argv) {
 					JobSlot& js = global::job_slots[i];
 					if (js.ready_for_job) {
 						js.ready_for_job = false;
+						js.type = JOB_COMP;
 						js.stream_id = stream_id;
 						js.round_number = round_number;
 						mpz_set(js.datum, temp_mpz);
 						// Signal the thread to begin the job.
 						sem_post(&js.job_described);
-						goto job_assigned;
+						goto job_assigned2;
 					}
 				}
 				assert("BUGBUGBUG: global::workers_ready semaphore was non-empty when no slot was free!" == NULL);
-				job_assigned:
+				job_assigned2:
 				break;
 			}
 			case 'r': {
