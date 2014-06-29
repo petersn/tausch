@@ -4,12 +4,14 @@
 #include <sys/time.h>
 #include <stdio.h>
 
-#define EXP_ITERS 500
-#define MUL_ITERS 1000000
-#define TARGET_MEM_IN_MiB ((float)(1<<15))
-#define TARGET_BYTES_PER_SECOND 2048.0
+#define EXP_ITERS 100
+#define MUL_ITERS 200000
+
+#define SERVER_COUNT 1000.0
+#define TARGET_MEM_IN_MiB (((float)(1<<15))*SERVER_COUNT)
+#define TARGET_BYTES_PER_SECOND 100000.0
 #define MAX_TRADEOFF 21
-#define THREADING_BOOST 8.0
+#define THREADING_BOOST (8.0*SERVER_COUNT)
 
 #define TARGET_S_PER_ROUND (128.0 / TARGET_BYTES_PER_SECOND)
 
@@ -23,13 +25,13 @@
 
 int main(int argc, char** argv) {
 	struct timeval start, stop; 
-	printf("Benchmarking 2048-bit ** 2048-bit modulo 2048-bit exponentiation.\n");
+	printf("Benchmarking 2048-bit ** 1024-bit modulo 2048-bit exponentiation.\n");
 	mpz_t x, y, z;
 	mpz_init_set_ui(x, 7);
 	mpz_init_set_ui(y, 3);
 	mpz_init_set_ui(z, 5);
 	mpz_pow_ui(x, x, 729);
-	mpz_pow_ui(y, y, 1292);
+	mpz_pow_ui(y, y, 646);
 	mpz_pow_ui(z, z, 882);
 	gettimeofday(&start, NULL);
 	int i = EXP_ITERS;
@@ -42,6 +44,7 @@ int main(int argc, char** argv) {
 	printf("Benchmarking 2048-bit * 2048-bit modulo 2048-bit multiplication.\n");
 	gettimeofday(&start, NULL);
 	i = MUL_ITERS;
+	mpz_mul(y, y, y);
 	while (i--) {
 		mpz_mul(x, x, y);
 		mpz_mod(x, x, z);
@@ -51,13 +54,13 @@ int main(int argc, char** argv) {
 
 	double rate = MUL_ITERS / DT;
 	printf("\n=== Derived statistics:\n");
-	printf("Naive resultant exp speed: x%.2f\n", rate / 3072 / native_rate);
+	printf("Naive resultant exp speed: x%.2f\n", rate / 1536 / native_rate);
 	printf("With acceleration tables:\n");
 	double total_speed[MAX_TRADEOFF];
 	double memory_per_entry[MAX_TRADEOFF];
 	for (int i = 1; i < MAX_TRADEOFF; i++) {
-		double muls_needed = (2048.0 / i) * (1 - 1.0/(1<<i));
-		double mem_expand = (2048.0 / i) * ((1<<i) - 1);
+		double muls_needed = (1024.0 / i) * (1 - 1.0/(1<<i));
+		double mem_expand = (1024.0 / i) * ((1<<i) - 1);
 		double mem_mib = (mem_expand * 256.0) / (1<<20);
 		printf("  %2i-bit: x%.2f (%.2f MiB/entry)", i, (rate / muls_needed) / native_rate, mem_mib);
 		if (i%2 == 0)
@@ -85,8 +88,11 @@ int main(int argc, char** argv) {
 		if (not flag)
 			break;
 	}
+	users--;
 	printf("Last workable parameters:\n");
-	printf("Users: %i, with %i-bit tables.\n", users-1, last_tradeoff);
+	printf("Users: %i, with %i-bit tables.\n", users, last_tradeoff);
+	printf("Total effective bandwidth: %.2f MiB/s\n", (users*users*TARGET_BYTES_PER_SECOND) / (float)(1<<20));
+	printf("Per user effective bandwidth: %.2f MiB/s\n", (users*TARGET_BYTES_PER_SECOND) / (float)(1<<20));
 
 	return 0;
 }
