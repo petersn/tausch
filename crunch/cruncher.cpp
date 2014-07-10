@@ -549,7 +549,7 @@ int main(int argc, char** argv) {
 			}
 			case 'i':
 				// Return status information.
-				write(sockfd, "Status.\n", 8);
+				write(sockfd, "1\n", 2);
 				break;
 			default:
 				fprintf(stderr, "Got invalid command character: %i\n", type);

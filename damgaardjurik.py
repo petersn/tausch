@@ -31,15 +31,13 @@ def miller_rabin(n, k=32):
 	return True
 
 def modular_inverse(a, m):
-	"""modular_inverse(a, m) -> b such that (a*b)%m == 1"""
-	def egcd(a, b):
-		if a == 0:
-			return (b, 0, 1)
-		g, y, x = egcd(b % a, a)
-		return g, x - (b // a) * y, y
-	g, x, y = egcd(a, m)
-	assert g == 1, "No modular inverse exists!"
-	return x % m
+	"""modular_inverse(a, m) -> b such that (a * b) % m == 1, or None if none exists"""
+	a, c = a % m, 1
+	while a > 1:
+		q, a = m / a, m % a
+		c = (-c * q) % m
+	if a == 1:
+		return c
 
 def bit_prime(bits):
 	"""bit_prime(bits) -> probable prime of given bit length"""
