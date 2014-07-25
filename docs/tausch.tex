@@ -1,18 +1,81 @@
 \documentclass[12pt]{article}
 \usepackage{amsmath,amssymb}
+\usepackage[margin=3cm]{geometry}
 \author{Peter Schmidt-Nielsen}
 \title{Tausch}
 \begin{document}
 \maketitle
 \begin{abstract}
-Tausch is a distributed protocol for constructing bandwidth-efficient distributed broadcast channels.
+Tausch is a protocol for constructing bandwidth-efficient distributed broadcast channels.
 The protocol provides anonymity for those listening to broadcast channels, without use of any trusted servers.
-Assuming $n$ users each transmitting at a constant rate, the naive solution of simply sending all broadcast messages to all users has $\mathcal{O}(n)$ time and bandwidth complexity for each user, and $\mathcal{O}(n^2)$ bandwidth complexity for the network.
-Tausch allows many dynamic time/bandwidth tradeoffs, but in the asymptotically optimal configuration, each user has a $\mathcal{O}(n)$ time burden, $\mathcal{O}(\sqrt{n})$ bandwidth burden, and the network as a whole experiences $\mathcal{O}(n^{1.5})$ bandwith complexity.
-Secure delegation is possible, allowing a user to experience $\mathcal{O}(1)$ time and bandwidth burdens.
+Assuming $n$ users each transmitting at a constant rate, the naive solution of simply sending all messages to all users has $\mathcal{O}(n)$ time and bandwidth complexity for each user, and $\mathcal{O}(n^2)$ bandwidth complexity for the network.
+Tausch allows many dynamic time/bandwidth tradeoffs, but in the most distributed configuration, each user has an $\mathcal{O}(n)$ time and $\mathcal{O}(\sqrt{n})$ bandwidth complexity, and the network as a whole experiences an $\mathcal{O}(n^{3/2})$ bandwidth burden.
+However, time and bandwidth can be efficiently traded off; secure delegation is possible, allowing every user to experience $\mathcal{O}(1)$ time and bandwidth complexities (asymptotically optimal) at the cost of a central party paying $\mathcal{O}(n)$ in bandwidth (asymptotically optimal) and $\mathcal{O}(n^2)$ in time.
+This last tradeoff is implemented in the Tausch software package.
 \end{abstract}
 
 \section{Introduction}
+\subsection{Motivation}
+While programs like pgp or gpg aim to hide the content of a message, systems like Tor aim to hide the sender and recipient.
+However, such systems tend to rely on either a set of trusted parties, or a form of distributed trust.
+For example, with Tor, if $\epsilon$ of the network is compromised then any given ``circuit'' is completely compromised with probability $\epsilon^3$.
+Further, the entry and exit nodes of a circuit are compromised with probability $\epsilon^2$, allowing timing attacks.
+With the recent revelations that many world governments are investing considerable resources into surveillance, it seems prudent to be wary of systems whose security guarantees degrade as the proportion of compromised nodes in the network increases.
+
+In contrast, Tausch is designed such that proper use of the network results in no party gaining more than a denial-of-service ability over any other party.
+In fact, even if every party other than a user is compromised, he or she leaks no more information to the network than in an ideal model outlined in the next section.
+There are some caveats to this guarantee; improper use of the network can expose a user, although these attacks are quite generic.
+
+\subsection{Models}
+We wish to develop a notion of optimal generic attacks that apply to any networked anonymity system, even with trusted parties.
+Let a user be called ``anonymous'' if whom he or she communicates with cannot be determined.
+Thus, anonymity is only defined with respect to a given third party; communicating parties are not anonymous to each other, and may or may not be anonymous to a third party depending on what data he or she has access to.
+
+Let us examine a model in which there is a trusted third party Trent whom all users send their messages (with attached routing information) to.
+Trent acts as a proxy, and immediately forwards these messages on to their intendent recipients.
+Assume a star topology network, in which each user has a duplex link to Trent.
+All messages sent to or from Trent are randomized, authenticated, and encrypted, disguising everything but their length.
+This model provides complete anonymity from any attacker Eve who can monitor at most one network link.
+However, the moment Eve can monitor two links, (say both from Alice to Trent and Bob to Trent) then timing and packet size reveal if Alice and Bob are communicating.
+
+As a modification, Trent can accumulate messages over a time window (or ``round''), and forward them in a random order at the round.
+Further, users can agree to always send packets of a given fixed size, and at most one packet per round.
+Unfortunately, Eve can notice Alice sending a packet in a given round correlates strongly with Bob receiving a packet for that round.
+Thus, we must strengthen our model yet further.
+It doesn't suffice for Alice and Bob to send at most one packet per round, they must send exactly one packet per round.
+Further, Trent must send exactly one packet to each user at the end of each round.\footnote{This requires dummy packets, and a queue or packet dropping strategy if multiple packets were to be sent down a link in one round. Alternatively, Trent could send exactly two packets down each link at the end of each round, etc. The details are unimportant to the model.}
+
+This model is almost sufficient.
+Imagine Trent's forwarding service is being used to implement a real-time chat system.
+Over the long run, Eve can observe that Alice tends to connect to Trent at times that overlap strongly with Bob.
+Assuming Eve can tap all (or a substantial fraction of) of Alice's outgoing network links, the only solution to this attack is for Alice to have a long term persistent connection to Trent, sending dummy packets all the time, to disguise her usage patterns.
+
+One can think of modifications that appear to improve the system's security.
+For example, Alice and Bob could periodically poll Trent for new packets, and Trent could reply with either a queued or a dummy packet.
+This appears to allow Alice and Bob to connect and disconnect freely without sacrificing anonymity.
+However, it is still possible that the patterns of Alice and Bob connecting and disconnecting might reveal that they communicate with each other.
+The observation that a secret organization begins ordering more pizza indicates that meetings are going on, even if one can't track the members.
+Likewise, if Alice, Bob, and Carol all start connecting to Trent much more over a window of time, or otherwise have strongly correlated connection patterns, anonymity can be broken.
+
+In light of this, it seems prudent to maintain a persistent connection at all times, possibly via a high-uptime proxy.
+For example, if in my home network I have a desktop machine that is on most of the time it can maintain a persistent connection to the Tausch network.
+Then, when I wish to use Tausch from my laptop I can make use of this proxy.
+So long as an attacker cannot monitor my home network traffic I'm still safe from timing analysis.
+
+Tausch works to instantiate Trent's ideal functionality with an untrusted server, which mediates a large multi-party computation (MPC) between the end users (now ``clients'' of the central server).
+The untrusted central server learns no more than an attacker who can read and tamper with messages to and from Trent in the ideal world.
+Unfortunately, this can be quite a lot, and is why ``proper use'' of the Tausch network is crucial.
+
+
+I consider the above attacks ``generic,'' as they apply to any routing system where Eve can watch a substantial proportion of the users' connections.
+Tor attempts to mitigate these generic attacks by simply having so many nodes that it becomes prohibitive for an attacker to systematically monitor connections into and out of the network.
+Without a large network size, it's hard for Tausch to do the same, and other techniques are resorted to, including tunneling via Tor.
+
+\section{Overview}
+TODO: In order to maintain persistent connections, the bandwidth and computational burden must be small. We're aiming for $\mathcal{O}(1)$ in both.
+
+In light of the difficulties 
+
 Tausch is a protocol (with accompanying implementation) for constructing anonymous broadcast channels.
 Each channel can be transmitted to only by a single user, and can be recieved by any number of users.
 No party can determine if a given user is recieving a given channel, but can determine the number of channels he or she is recieving.
