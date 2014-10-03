@@ -1,5 +1,5 @@
 
-CPPFLAGS=-Wall -g -lgmp -pthread -std=c++0x
+CPPFLAGS=-Wall -g -lgmp -ldl -pthread -std=c++0x -I/home/snp/local/openssl-1.0.1h/include
 
 all: cruncher
 
@@ -8,6 +8,9 @@ cruncher: cruncher.o Makefile
 
 simple_test: simple_test.o Makefile
 	g++ $(CPPFLAGS) -o $@ $<
+
+bn_tester: bn_tester.o Makefile
+	g++ $(CPPFLAGS) -o $@ $< ../lib/libcrypto.a
 
 .PHONY: clean
 clean:

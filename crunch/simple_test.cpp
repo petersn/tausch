@@ -6,6 +6,7 @@
 
 #define EXP_ITERS 100
 #define MUL_ITERS 200000
+#define INV_ITERS 100
 
 #define SERVER_COUNT 2000.0
 #define TARGET_MEM_IN_MiB (((float)(1<<15))*SERVER_COUNT)
@@ -22,17 +23,18 @@
 		printf("Ops/s:      %f\n", iters / DT); \
 	} while (0)
 
-
 int main(int argc, char** argv) {
 	struct timeval start, stop; 
 	printf("Benchmarking 2048-bit ** 1024-bit modulo 2048-bit exponentiation.\n");
-	mpz_t x, y, z;
+	mpz_t x, y, z, w;
 	mpz_init_set_ui(x, 7);
 	mpz_init_set_ui(y, 3);
 	mpz_init_set_ui(z, 5);
-	mpz_pow_ui(x, x, 729);
-	mpz_pow_ui(y, y, 646);
-	mpz_pow_ui(z, z, 882);
+	mpz_init_set_ui(w, 11);
+	mpz_pow_ui(x, x, 729); // 2048 bit
+	mpz_pow_ui(y, y, 646); // 1024 bit
+	mpz_pow_ui(z, z, 882); // 2048 bit
+	mpz_pow_ui(w, w, 592); // 2048 bit
 	gettimeofday(&start, NULL);
 	int i = EXP_ITERS;
 	while (i--)
@@ -44,13 +46,20 @@ int main(int argc, char** argv) {
 	printf("Benchmarking 2048-bit * 2048-bit modulo 2048-bit multiplication.\n");
 	gettimeofday(&start, NULL);
 	i = MUL_ITERS;
-	mpz_mul(y, y, y);
 	while (i--) {
-		mpz_mul(x, x, y);
+		mpz_mul(x, x, w);
 		mpz_mod(x, x, z);
 	}
 	gettimeofday(&stop, NULL);
 	STATS(MUL_ITERS);
+
+	printf("Benchmarking 2048-bit modulo 2048-bit modular inversion.\n");
+	gettimeofday(&start, NULL);
+	i = INV_ITERS;
+	while (i--)
+		mpz_invert(x, w, z);
+	gettimeofday(&stop, NULL);
+	STATS(INV_ITERS);
 
 	double rate = MUL_ITERS / DT;
 	printf("\n=== Derived statistics:\n");
